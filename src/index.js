@@ -44,6 +44,7 @@ class WebServer {
       const getFileInfo = fileObjects.filter((file) =>
         file.name.includes(hash)
       );
+      //
 
       // TODO : getFileInfo가 비어있으면 axios.get으로 이미지를 받아와서 fs에 저장
       if (getFileInfo.length === 0) {
