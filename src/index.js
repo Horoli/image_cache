@@ -3,6 +3,7 @@ const fs = require("fs");
 const Axios = require("axios");
 const crypto = require("crypto");
 const path = require("path");
+// const HImageCache = require("./Utility/h_image_cache");
 
 class WebServer {
   constructor(opts = {}) {
@@ -19,39 +20,68 @@ class WebServer {
       const { url } = req.body;
       console.log(url);
 
-      const result = await Axios({
-        method: "get",
-        url: url,
-        responseType: "stream",
-      })
-        .then(async (response) => {
-          const contentType = response.headers["content-type"];
+      if (!url) {
+        throw Error("url is empty");
+      }
 
-          // TODO : Add content type check
-          console.log("contentType", contentType);
+      const hash = crypto.createHash("sha256").update(url).digest("hex");
 
+      const getImageDirPath = path.join(__dirname, "image");
+
+      const fileList = fs.readdirSync(getImageDirPath);
+
+      const fileObjects = fileList.reduce((acc, file) => {
+        const [filename, fileType] = file.split(".");
+        let fileObject = {};
+
+        fileObject["name"] = filename;
+        fileObject["type"] = fileType;
+
+        acc.push(fileObject);
+        return acc;
+      }, []);
+
+      const getFileInfo = fileObjects.filter((file) =>
+        file.name.includes(hash)
+      );
+
+      // TODO : getFileInfo가 비어있으면 axios.get으로 이미지를 받아와서 fs에 저장
+      if (getFileInfo.length === 0) {
+        try {
+          const result = await Axios({
+            method: "get",
+            url: url,
+            responseType: "stream",
+          }).then(async (response) => {
+            return response;
+          });
+          const contentType = result.headers["content-type"];
           const saveType = contentType.split("/")[1];
 
-          const hash = crypto.createHash("sha256").update(url).digest("hex");
           const filePath = path.join(__dirname, `/image/${hash}.${saveType}`);
-          console.log(filePath);
-          //  해당 경로에 hash와 같은 값의 파일이 존재하는지 확인 후 있으면 해당 파일을 반환
-          if (fs.existsSync(filePath)) {
-            return filePath;
-          } else {
-            await response.data.pipe(fs.createWriteStream(filePath));
-          }
+          const writer = fs.createWriteStream(filePath);
 
-          return filePath;
-        })
-        .catch((error) => {
-          console.log(error);
-        });
-      const readFile = fs.readFileSync(result);
-      rep.type("image/png").send(readFile);
-      //   return {
-      //     image: readFile,
-      //   };
+          await new Promise((resolve, reject) => {
+            result.data.pipe(writer);
+
+            writer.on("finish", resolve);
+            writer.on("error", reject);
+          });
+
+          const readFile = fs.readFileSync(filePath);
+          rep.type(`image/${saveType}`).send(readFile);
+        } catch {
+          console.error("Error during image download or save:", error);
+          rep.status(500).send("Failed to download or save the image.");
+        }
+
+        return;
+      }
+
+      const file = `${getFileInfo[0].name}.${getFileInfo[0].type}`;
+      const filePath = path.join(__dirname, `/image/${file}`);
+      const readFile = fs.readFileSync(filePath);
+      rep.type(`image/${getFileInfo[0].type}`).send(readFile);
     });
   }
 
