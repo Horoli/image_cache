@@ -21,70 +21,65 @@ class WebServer {
       console.log(url);
 
       if (!url) {
-        throw Error("url is empty");
+        return rep.status(400).send("url is empty");
       }
 
       const hash = crypto.createHash("sha256").update(url).digest("hex");
+      const imageDirPath = path.join(__dirname, "image");
+      const cachedImagePath = path.join(imageDirPath, `${hash}`);
 
-      const getImageDirPath = path.join(__dirname, "image");
-
-      const fileList = fs.readdirSync(getImageDirPath);
-
-      const fileObjects = fileList.reduce((acc, file) => {
-        const [filename, fileType] = file.split(".");
-        let fileObject = {};
-
-        fileObject["name"] = filename;
-        fileObject["type"] = fileType;
-
-        acc.push(fileObject);
-        return acc;
-      }, []);
-
-      const getFileInfo = fileObjects.filter((file) =>
-        file.name.includes(hash)
-      );
-      //
-      //
-
-      // TODO : getFileInfo가 비어있으면 axios.get으로 이미지를 받아와서 fs에 저장
-      if (getFileInfo.length === 0) {
-        console.log(`[${new Date().toLocaleString()}] getting Image...`);
-        try {
-          const result = await Axios({
-            method: "get",
-            url: url,
-            responseType: "stream",
-          }).then(async (response) => {
-            return response;
-          });
-          const contentType = result.headers["content-type"];
-          const saveType = contentType.split("/")[1];
-
-          const filePath = path.join(__dirname, `/image/${hash}.${saveType}`);
-          const writer = fs.createWriteStream(filePath);
-
-          await new Promise((resolve, reject) => {
-            result.data.pipe(writer);
-
-            writer.on("finish", resolve);
-            writer.on("error", reject);
-          });
-
-          const readFile = fs.readFileSync(filePath);
-          rep.type(`image/${saveType}`).send(readFile);
-        } catch {
-          console.error("Error during image download or save:", error);
-          rep.status(500).send("Failed to download or save the image.");
+      try {
+        // TODO : 이미지 저장 디렉토리가 없으면 생성
+        if (!fs.existsSync(imageDirPath)) {
+          fs.mkdirSync(imageDirPath);
         }
 
-        return;
-      }
+        const cachedFile = fs
+          .readdirSync(imageDirPath)
+          .find((file) => file.startsWith(hash));
 
-      const file = `${getFileInfo[0].name}.${getFileInfo[0].type}`;
-      const filePath = path.join(__dirname, `/image/${file}`);
-      const readFile = fs.readFileSync(filePath);
-      rep.type(`image/${getFileInfo[0].type}`).send(readFile);
+        if (cachedFile) {
+          console.log(
+            `[${new Date().toLocaleString()}] return cached Image...`
+          );
+          const cachedImage = fs.readFileSync(
+            path.join(imageDirPath, cachedFile)
+          );
+          return rep
+            .type(`image/${cachedFile.split(".").pop()}`)
+            .send(cachedImage);
+        }
+
+        console.log(`[${new Date().toLocaleString()}] Downloading image...`);
+        const { data: imageStream, headers } = await Axios({
+          method: "get",
+          url: url,
+          responseType: "stream",
+        });
+
+        const contentType = headers["content-type"];
+        if (!contentType.startsWith("image/")) {
+          return rep.status(400).send("Content type is not an image");
+        }
+
+        const fileExtension = contentType.split("/").pop();
+        const fullPath = `${cachedImagePath}.${fileExtension}`;
+        const writer = fs.createWriteStream(fullPath);
+
+        await new Promise((resolve, reject) => {
+          imageStream.pipe(writer);
+          writer.on("finish", resolve);
+          writer.on("error", reject);
+        });
+
+        console.log(`[${new Date().toLocaleString()}] Image download complete`);
+        const imageData = fs.readFileSync(fullPath);
+        return rep.type(`image/${fileExtension}`).send(imageData);
+      } catch (err) {
+        //
+        console.error("Error during image processing:", err);
+        return rep.status(500).send("Failed to download or serve the image.");
+      }
     });
   }
 
