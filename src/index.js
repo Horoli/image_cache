@@ -37,7 +37,9 @@ class WebServer {
 
   $initRoute() {
     const imageDirPath =
-      os.platform() === "linux" ? "/mnt/data" : path.join(__dirname, "image");
+      os.platform() === "linux"
+        ? "/mnt/data/cache"
+        : path.join(__dirname, "image");
 
     this.$webServer.get("/image/:hash", async function (req, rep) {
       const { hash } = req.params;
