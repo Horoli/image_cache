@@ -3,6 +3,7 @@ const fs = require("fs");
 const Axios = require("axios");
 const crypto = require("crypto");
 const path = require("path");
+const os = require("os");
 // const HImageCache = require("./Utility/h_image_cache");
 
 class WebServer {
@@ -25,13 +26,14 @@ class WebServer {
       }
 
       const hash = crypto.createHash("sha256").update(url).digest("hex");
-      const imageDirPath = path.join(__dirname, "image");
+      const imageDirPath =
+        os.platform() === "linux" ? "/mnt/data" : path.join(__dirname, "image");
       const cachedImagePath = path.join(imageDirPath, `${hash}`);
 
       try {
         // TODO : 이미지 저장 디렉토리가 없으면 생성
         if (!fs.existsSync(imageDirPath)) {
-          fs.mkdirSync(imageDirPath);
+          fs.mkdirSync(imageDirPath, { recursive: true });
         }
 
         const cachedFile = fs
