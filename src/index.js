@@ -44,7 +44,7 @@ class WebServer {
     this.$webServer.get("/image/:hash", async function (req, rep) {
       const { hash } = req.params;
       const cachedImagePath = path.join(imageDirPath, hash);
-      const chacedImageMetaPath = path.join(imageDirPath, `${hash}.meta`);
+      const cachedImageMetaPath = path.join(imageDirPath, `${hash}.meta`);
 
       if (!fs.existsSync(cachedImagePath)) {
         return rep.status(404).send("Image not found");
@@ -52,8 +52,11 @@ class WebServer {
 
       const cachedImage = fs.readFileSync(cachedImagePath);
       const metadata = JSON.parse(
-        fs.readFileSync(chacedImageMetaPath, "utf-8")
+        fs.readFileSync(cachedImageMetaPath, "utf-8")
       );
+
+      console.log(cachedImage);
+
       rep.headers(metadata);
       return rep.send(cachedImage);
     });
