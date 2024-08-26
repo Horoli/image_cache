@@ -4,7 +4,26 @@ const Axios = require("axios");
 const crypto = require("crypto");
 const path = require("path");
 const os = require("os");
+const Stream = require("stream");
 // const HImageCache = require("./Utility/h_image_cache");
+
+class StreamDuplicater extends Stream.Readable {
+  constructor(stream) {
+    super({
+      read() {},
+    });
+
+    stream.on("data", (chunk) => {
+      this.push(chunk);
+    });
+    stream.on("end", (_) => {
+      this.push(null);
+    });
+    stream.on("error", (err) => {
+      this.emit("error", err);
+    });
+  }
+}
 
 class WebServer {
   constructor(opts = {}) {
@@ -17,6 +36,26 @@ class WebServer {
   }
 
   $initRoute() {
+    const imageDirPath =
+      os.platform() === "linux" ? "/mnt/data" : path.join(__dirname, "image");
+
+    this.$webServer.get("/image/:hash", async function (req, rep) {
+      const { hash } = req.params;
+      const cachedImagePath = path.join(imageDirPath, hash);
+      const chacedImageMetaPath = path.join(imageDirPath, `${hash}.meta`);
+
+      if (!fs.existsSync(cachedImagePath)) {
+        return rep.status(404).send("Image not found");
+      }
+
+      const cachedImage = fs.readFileSync(cachedImagePath);
+      const metadata = JSON.parse(
+        fs.readFileSync(chacedImageMetaPath, "utf-8")
+      );
+      rep.headers(metadata);
+      return rep.send(cachedImage);
+    });
+
     this.$webServer.post("/image", async function (req, rep) {
       const { url } = req.body;
       console.log(url);
@@ -26,30 +65,31 @@ class WebServer {
       }
 
       const hash = crypto.createHash("sha256").update(url).digest("hex");
-      const imageDirPath =
-        os.platform() === "linux" ? "/mnt/data" : path.join(__dirname, "image");
-      const cachedImagePath = path.join(imageDirPath, `${hash}`);
+      const cachedImagePath = path.join(imageDirPath, hash);
+      const chacedImageMetaPath = path.join(imageDirPath, `${hash}.meta`);
+      rep.header("image-hash", hash);
 
       try {
-        // TODO : 이미지 저장 디렉토리가 없으면 생성
         if (!fs.existsSync(imageDirPath)) {
           fs.mkdirSync(imageDirPath, { recursive: true });
         }
 
-        const cachedFile = fs
-          .readdirSync(imageDirPath)
-          .find((file) => file.startsWith(hash));
-
-        if (cachedFile) {
+        const cacheExists = fs.existsSync(cachedImagePath);
+        /// 이미지가 캐시되어 있는 경우
+        /// metadata를 headers에 추가하고 캐시된 이미지를 반환
+        if (cacheExists) {
           console.log(
             `[${new Date().toLocaleString()}] return cached Image...`
           );
-          const cachedImage = fs.readFileSync(
-            path.join(imageDirPath, cachedFile)
+          const metadata = JSON.parse(
+            fs.readFileSync(chacedImageMetaPath, "utf-8")
           );
-          return rep
-            .type(`image/${cachedFile.split(".").pop()}`)
-            .send(cachedImage);
+          rep.headers(metadata);
+          if (req.headers["hash-only"] === "true") {
+            return rep.send("ok");
+          }
+          const cachedImage = fs.readFileSync(cachedImagePath);
+          return rep.send(cachedImage);
         }
 
         console.log(`[${new Date().toLocaleString()}] Downloading image...`);
@@ -64,19 +104,25 @@ class WebServer {
           return rep.status(400).send("Content type is not an image");
         }
 
-        const fileExtension = contentType.split("/").pop();
-        const fullPath = `${cachedImagePath}.${fileExtension}`;
-        const writer = fs.createWriteStream(fullPath);
+        const imgStream1 = new StreamDuplicater(imageStream);
+        const imgStream2 = new StreamDuplicater(imageStream);
+
+        const writeStream = fs.createWriteStream(cachedImagePath);
+        fs.writeFileSync(chacedImageMetaPath, JSON.stringify(headers));
 
         await new Promise((resolve, reject) => {
-          imageStream.pipe(writer);
-          writer.on("finish", resolve);
-          writer.on("error", reject);
+          imgStream1.pipe(writeStream);
+          writeStream.on("finish", resolve);
+          writeStream.on("error", reject);
         });
 
         console.log(`[${new Date().toLocaleString()}] Image download complete`);
-        const imageData = fs.readFileSync(fullPath);
-        return rep.type(`image/${fileExtension}`).send(imageData);
+        rep.headers(headers);
+        if (req.headers["hash-only"] === "true") {
+          imgStream2.destroy();
+          return rep.send("ok");
+        }
+        return rep.send(imgStream2);
       } catch (err) {
         //
         console.error("Error during image processing:", err);
