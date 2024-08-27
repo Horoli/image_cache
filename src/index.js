@@ -55,15 +55,12 @@ class WebServer {
         fs.readFileSync(cachedImageMetaPath, "utf-8")
       );
 
-      console.log(cachedImage);
-
       rep.headers(metadata);
       return rep.send(cachedImage);
     });
 
     this.$webServer.post("/image", async function (req, rep) {
       const { url } = req.body;
-      console.log(url);
 
       if (!url) {
         return rep.status(400).send("url is empty");
